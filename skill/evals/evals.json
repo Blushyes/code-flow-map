@@ -1,0 +1,25 @@
+{
+  "skill_name": "code-flow-map",
+  "note": "测试用例模板：把 target_repo 指向你自己的仓库，prompt 换成你想追踪的真实逻辑。",
+  "target_repo": "<你的仓库路径>",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "帮我看下 <某个命令/接口> 的逻辑",
+      "expected_output": "追踪该入口的调用链，产出交互式 HTML：含逻辑分组、节点引用真实 file:line、关键产物的 I/O 结构忠于代码，点节点能在右侧看 I/O 与来源/去向。",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "梳理一下 <模块A> → <模块B> 这一段，数据是怎么流的",
+      "expected_output": "聚焦该子流程，每个节点 I/O 标了来源/去向，结构忠于源码。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "<某个函数> 是怎么做的，画个图看看",
+      "expected_output": "追踪该函数的输入→处理→输出，结构对得上其定义处的 file:line。",
+      "files": []
+    }
+  ]
+}

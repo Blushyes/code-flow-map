@@ -1,0 +1,147 @@
+{
+  "title": "下单流程 (POST /orders)",
+  "summary": "一个通用示例：请求 → 校验 → 按支付方式分发 → 订单记录 → 落库 → 通知。可直接当模板改。",
+  "rankdir": "LR",
+  "clusters": [
+    { "id": "intake", "label": "接入 / 校验" },
+    { "id": "fulfill", "label": "落库 / 履约" }
+  ],
+  "nodes": [
+    {
+      "id": "request",
+      "label": "POST /orders",
+      "kind": "start",
+      "summary": "下单请求入口",
+      "source": "src/api/orders.ts:20",
+      "outputs": [
+        { "name": "body", "type": "object", "format": "json", "desc": "请求体", "to": "validate",
+          "schema": { "customer_id": "str", "items": [{ "sku": "str", "qty": "int" }], "coupon": "str?", "pay_method": "str" },
+          "example": { "customer_id": "c_001", "items": [{ "sku": "A-1", "qty": 2 }], "pay_method": "card" } }
+      ]
+    },
+    {
+      "id": "validate",
+      "label": "校验 & 鉴权",
+      "kind": "decision",
+      "cluster": "intake",
+      "summary": "校验字段、库存与登录态；不合法直接拒绝",
+      "source": "src/api/orders.ts:34",
+      "inputs": [{ "name": "body", "type": "object", "format": "json", "from": "request" }],
+      "outputs": [
+        { "name": "draft", "type": "object", "format": "json", "desc": "校验通过的订单草稿", "to": "dispatch" }
+      ]
+    },
+    {
+      "id": "dispatch",
+      "label": "按支付方式分发",
+      "kind": "decision",
+      "cluster": "intake",
+      "summary": "依 pay_method 选对应支付处理器",
+      "source": "src/payment/dispatch.ts:12",
+      "inputs": [{ "name": "draft", "type": "object", "format": "json", "from": "validate" }],
+      "outputs": [{ "name": "pay_method", "type": "string", "format": "text", "to": ["card_pay", "wallet_pay", "transfer_pay"] }]
+    },
+    {
+      "id": "card_pay", "label": "信用卡", "kind": "process", "cluster": "intake",
+      "summary": "调用卡组织网关扣款",
+      "source": "src/payment/card.ts:8",
+      "inputs": [{ "name": "draft", "type": "object", "format": "json", "from": "dispatch" }],
+      "outputs": [{ "name": "charge", "type": "object", "format": "json", "to": "order" }]
+    },
+    {
+      "id": "wallet_pay", "label": "钱包余额", "kind": "process", "cluster": "intake",
+      "summary": "从用户钱包余额扣减",
+      "source": "src/payment/wallet.ts:8",
+      "inputs": [{ "name": "draft", "type": "object", "format": "json", "from": "dispatch" }],
+      "outputs": [{ "name": "charge", "type": "object", "format": "json", "to": "order" }]
+    },
+    {
+      "id": "transfer_pay", "label": "银行转账", "kind": "process", "cluster": "intake",
+      "summary": "生成待支付转账单（异步回调）",
+      "source": "src/payment/transfer.ts:8",
+      "inputs": [{ "name": "draft", "type": "object", "format": "json", "from": "dispatch" }],
+      "outputs": [{ "name": "charge", "type": "object", "format": "json", "to": "order" }]
+    },
+    {
+      "id": "order",
+      "label": "订单记录",
+      "kind": "data",
+      "cluster": "fulfill",
+      "note": "唯一事实源",
+      "summary": "归一化的订单对象，后续落库/通知都以它为准",
+      "source": "src/domain/order.ts:45",
+      "inputs": [{ "name": "charge", "type": "object", "format": "json", "desc": "支付结果", "from": ["card_pay", "wallet_pay", "transfer_pay"] }],
+      "outputs": [
+        { "name": "order", "type": "object", "format": "json", "desc": "成品订单", "to": ["persist", "notify"],
+          "schema": { "id": "str", "customer_id": "str", "amount_cents": "int", "status": "str", "items": [{ "sku": "str", "qty": "int", "price_cents": "int" }], "created_at": "iso8601" },
+          "example": { "id": "ord_8f3", "customer_id": "c_001", "amount_cents": 3998, "status": "paid", "created_at": "2026-01-01T08:00:00Z" } }
+      ]
+    },
+    {
+      "id": "persist",
+      "label": "写 orders 表",
+      "kind": "io",
+      "cluster": "fulfill",
+      "summary": "落库到 orders 表（事务内）",
+      "source": "src/repo/orderRepo.ts:30",
+      "inputs": [{ "name": "order", "type": "object", "format": "json", "from": "order" }],
+      "outputs": [
+        { "name": "orders 表", "type": "table", "format": "table", "desc": "数据库表结构", "to": "done",
+          "columns": [
+            { "name": "id", "type": "varchar(32)", "desc": "主键" },
+            { "name": "customer_id", "type": "varchar(32)", "desc": "下单用户" },
+            { "name": "amount_cents", "type": "int", "desc": "金额(分)" },
+            { "name": "status", "type": "varchar(16)", "desc": "paid / pending / failed" },
+            { "name": "created_at", "type": "timestamptz", "desc": "创建时间" }
+          ] }
+      ]
+    },
+    {
+      "id": "notify",
+      "label": "发送确认通知",
+      "kind": "io",
+      "cluster": "fulfill",
+      "summary": "推送下单成功通知（邮件 / 短信）",
+      "source": "src/notify/sender.ts:14",
+      "inputs": [{ "name": "order", "type": "object", "format": "json", "from": "order" }],
+      "outputs": [
+        { "name": "Notification", "type": "interface", "format": "code", "desc": "通知载荷类型",
+          "example": "interface Notification {\n  to: string;\n  channel: 'email' | 'sms';\n  template: 'order_paid';\n  vars: { order_id: string; amount: string };\n}" }
+      ]
+    },
+    {
+      "id": "done",
+      "label": "返回 201",
+      "kind": "end",
+      "cluster": "fulfill",
+      "summary": "返回创建结果",
+      "source": "src/api/orders.ts:58",
+      "inputs": [{ "name": "orders 行", "type": "table", "format": "text", "from": "persist" }],
+      "outputs": [{ "name": "201 Created", "type": "object", "format": "json", "example": { "id": "ord_8f3", "status": "paid" } }]
+    },
+    {
+      "id": "reject",
+      "label": "400 拒绝",
+      "kind": "end",
+      "cluster": "intake",
+      "summary": "校验/支付失败的拒绝出口",
+      "source": "src/api/orders.ts:40",
+      "inputs": [{ "name": "error", "type": "object", "format": "json", "example": { "code": "INVALID_COUPON", "msg": "优惠券已过期" } }]
+    }
+  ],
+  "edges": [
+    { "from": "request", "to": "validate", "label": "body" },
+    { "from": "validate", "to": "dispatch", "label": "draft" },
+    { "from": "validate", "to": "reject", "label": "校验失败", "kind": "error" },
+    { "from": "dispatch", "to": "card_pay", "label": "card" },
+    { "from": "dispatch", "to": "wallet_pay", "label": "wallet" },
+    { "from": "dispatch", "to": "transfer_pay", "label": "transfer" },
+    { "from": "card_pay", "to": "order", "label": "charge" },
+    { "from": "wallet_pay", "to": "order", "label": "charge" },
+    { "from": "transfer_pay", "to": "order", "label": "charge" },
+    { "from": "card_pay", "to": "reject", "label": "扣款失败", "kind": "error" },
+    { "from": "order", "to": "persist", "label": "order" },
+    { "from": "order", "to": "notify", "label": "order", "kind": "secondary" },
+    { "from": "persist", "to": "done", "label": "orders 行" }
+  ]
+}

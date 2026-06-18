@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>__TITLE__</title>
+<style>
+  :root{
+    --ink:#222; --accent:#d23; --up:#2f6fd0; --map:#0a8a5f; --muted:#888; --line:#ddd;
+    --panel-bg:#fafafa; --tag-bg:#f0f0f0;
+    --hand:"Comic Sans MS","Bradley Hand","Marker Felt","Segoe Print",cursive,sans-serif;
+    --mono:"SFMono-Regular",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#fff;color:var(--ink);
+            font-family:var(--hand);overflow:hidden}
+  #app{display:flex;height:100vh}
+  #workarea{flex:1;position:relative;overflow:hidden}
+  #panes{display:flex;height:100%}
+  .pane{flex:1;position:relative;overflow:hidden;background:
+    radial-gradient(circle, #eee 1px, transparent 1px) 0 0/22px 22px}
+  .pane + .pane{border-left:2px dashed #bbb}
+  .pane svg{width:100%;height:100%;cursor:grab;display:block}
+  .pane svg.grabbing{cursor:grabbing}
+  .pane-head{position:absolute;top:12px;left:14px;z-index:3;display:flex;gap:8px;align-items:center}
+  .pane-tag{font-family:var(--mono);font-size:12px;font-weight:700;background:#fff;
+    border:1px solid var(--ink);border-radius:5px;padding:3px 9px}
+  .pane-tag.new{color:var(--accent);border-color:var(--accent)}
+  .pane-max{font-family:var(--mono);font-size:12px;background:#fff;border:1px solid var(--ink);
+    border-radius:5px;padding:3px 9px;cursor:pointer}
+  .pane-max:hover{background:var(--tag-bg)}
+  #title{position:absolute;top:14px;left:18px;z-index:3;font-size:22px;font-weight:700;
+         pointer-events:none;max-width:60%}
+  #title small{display:block;font-size:14px;font-weight:400;color:var(--muted);margin-top:2px}
+  #hint{position:absolute;bottom:10px;left:18px;z-index:3;font-size:12px;color:var(--muted);
+        font-family:var(--mono);pointer-events:none}
+  #controls{position:absolute;top:14px;right:14px;z-index:5;display:flex;gap:8px}
+  #controls button{font-family:var(--mono);font-size:12px;background:#fff;
+    border:1.5px solid var(--ink);border-radius:6px;padding:5px 11px;cursor:pointer}
+  #controls button:hover{background:var(--tag-bg)}
+  #controls button.on{background:var(--ink);color:#fff}
+  .node-hit{cursor:pointer}
+  text{font-family:var(--hand);fill:var(--ink)}
+  /* migration overlay */
+  #mig{position:absolute;inset:0;z-index:20;background:rgba(0,0,0,.35);display:none;
+       align-items:center;justify-content:center}
+  #mig.show{display:flex}
+  #mig .card{background:#fff;border:2px solid var(--ink);border-radius:12px;max-width:680px;
+    max-height:80vh;overflow:auto;padding:22px 26px;font-family:var(--hand)}
+  #mig h2{margin:0 0 4px;font-size:22px}
+  #mig .strat{display:inline-block;font-family:var(--mono);font-size:12px;background:var(--tag-bg);
+    border:1px solid var(--line);border-radius:5px;padding:2px 8px;margin-bottom:10px}
+  #mig h3{font-family:var(--mono);font-size:13px;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.05em;margin:16px 0 6px;border-bottom:1px dashed var(--line);padding-bottom:3px}
+  #mig ol,#mig ul{margin:0;padding-left:22px;line-height:1.6}
+  #mig .close{float:right;cursor:pointer;border:1px solid var(--line);border-radius:6px;
+    font-family:var(--mono);font-size:12px;padding:3px 9px;background:#fff}
+  /* ---- side panel ---- */
+  #panel{width:400px;min-width:400px;border-left:3px solid var(--ink);
+         background:var(--panel-bg);overflow-y:auto;padding:18px 18px 60px}
+  #panel.collapsed{display:none}
+  #panel.empty .body{display:none}
+  #panel .placeholder{color:var(--muted);font-size:15px;line-height:1.6;margin-top:40px;text-align:center}
+  #panel:not(.empty) .placeholder{display:none}
+  #panel h2{font-size:21px;margin:0 0 2px}
+  .kind-badge{display:inline-block;font-family:var(--mono);font-size:11px;
+    background:var(--tag-bg);border:1px solid var(--line);border-radius:4px;
+    padding:1px 6px;vertical-align:middle;color:#555}
+  .summary{font-size:15px;line-height:1.5;margin:8px 0 6px}
+  .src{font-family:var(--mono);font-size:12px;color:#3858b8;margin:4px 0 14px;
+       word-break:break-all;cursor:pointer}
+  .src:hover{text-decoration:underline}
+  .src::before{content:"◧ ";color:var(--muted)}
+  /* mapping box (refactor compare) */
+  .map-box{border:1px solid var(--map);border-radius:8px;background:#f2fbf7;
+    padding:8px 10px;margin:8px 0 4px}
+  .map-box .chg{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:700;
+    background:var(--map);color:#fff;border-radius:4px;padding:1px 7px;margin-bottom:5px}
+  .map-box .chg.removed{background:var(--accent)}
+  .map-box .chg.new{background:var(--up)}
+  .map-link{font-family:var(--mono);font-size:12px;margin:3px 0}
+  .map-link b{color:var(--muted);font-weight:400}
+  .map-link a{color:var(--map);cursor:pointer;text-decoration:none;border-bottom:1px dotted var(--map)}
+  .map-link a:hover{background:#e3f6ee}
+  .map-why{font-size:13px;line-height:1.5;color:#333;margin-top:5px}
+  .io-section{margin-top:10px}
+  .io-section > h3{font-size:13px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--muted);font-family:var(--mono);margin:14px 0 6px;border-bottom:1px dashed var(--line);padding-bottom:3px}
+  .io-item{border:1px solid var(--line);border-radius:8px;background:#fff;
+    padding:8px 10px;margin-bottom:8px}
+  .io-head{font-family:var(--mono);font-size:13px;font-weight:700}
+  .io-head .ty{color:#0a7b54;font-weight:400}
+  .io-head .fmt{float:right;font-size:10px;background:var(--tag-bg);border-radius:3px;
+    padding:0 5px;color:#666;font-weight:400}
+  .io-desc{font-size:13px;color:#555;margin:3px 0}
+  .flowlink{font-family:var(--mono);font-size:12px;margin-top:4px}
+  .flowlink b{color:var(--muted);font-weight:400}
+  .flowlink a{color:var(--accent);cursor:pointer;text-decoration:none;border-bottom:1px dotted var(--accent)}
+  .flowlink a:hover{background:#fbeaec}
+  .struct{font-family:var(--mono);font-size:12px;line-height:1.5;margin-top:6px;
+    background:#fbfbfb;border:1px solid var(--line);border-radius:6px;padding:6px 8px;overflow-x:auto}
+  .struct .lbl{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;margin:2px 0}
+  .tree details{margin-left:12px}
+  .tree summary{cursor:pointer;list-style:none}
+  .tree summary::-webkit-details-marker{display:none}
+  .tree summary::before{content:"▸ ";color:var(--muted)}
+  .tree details[open] > summary::before{content:"▾ "}
+  .tree .k{color:#9c27b0}
+  .tree .s{color:#0a7b54}
+  .tree .n{color:#d2691e}
+  .tree .b{color:#3858b8}
+  .tree .leaf{margin-left:12px}
+  table.cols{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:12px}
+  table.cols th,table.cols td{border:1px solid var(--line);padding:3px 6px;text-align:left}
+  table.cols th{background:var(--tag-bg);color:#555;font-weight:600}
+  pre.code{margin:0;white-space:pre-wrap;word-break:break-word}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="workarea">
+    <div id="title"></div>
+    <div id="panes"></div>
+    <div id="controls"></div>
+    <div id="hint">拖拽 / 滚轮平移 · 双指捏合或开启滚轮缩放 · 点节点看 I/O 与数据流向</div>
+    <div id="mig"><div class="card"></div></div>
+  </div>
+  <aside id="panel" class="empty">
+    <div class="placeholder">点击任一节点<br/>查看它的输入 / 输出结构<br/>以及数据的来源与去向</div>
+    <div class="body"></div>
+  </aside>
+</div>
+
+<script>/*__DAGRE_JS__*/</script>
+<script>/*__ROUGH_JS__*/</script>
+<script>const FLOW_DATA = /*__FLOW_DATA__*/ null;</script>
+<script>
+(function(){
+  "use strict";
+  const FD = FLOW_DATA;
+  if(!FD){ document.getElementById("title").textContent="无 FLOW_DATA"; return; }
+  const SVGNS="http://www.w3.org/2000/svg";
+  const COMPARE = !!(FD.old && FD.new);
+
+  // ===== shared measure / kinds =====
+  const meas=document.createElement("canvas").getContext("2d");
+  meas.font='18px "Comic Sans MS","Marker Felt",cursive';
+  function nodeSize(n){
+    const lines=String(n.label||n.id).split("\n");
+    let w=0; lines.forEach(l=> w=Math.max(w, meas.measureText(l).width));
+    return { w:Math.max(88,Math.round(w)+34), h:Math.max(46,lines.length*22+22) };
+  }
+  const KIND={
+    process:{stroke:"#222",fill:"#fff",sw:2.4},
+    start:{stroke:"#0a7b54",fill:"#f3fbf7",sw:2.6},
+    end:{stroke:"#0a7b54",fill:"#f3fbf7",sw:2.6},
+    decision:{stroke:"#b8860b",fill:"#fffdf3",sw:2.6},
+    data:{stroke:"#3858b8",fill:"#f5f7ff",sw:2.4},
+    io:{stroke:"#7a3aa8",fill:"#faf5ff",sw:2.4},
+  };
+
+  // ===== shared svg helpers =====
+  function text(x,y,str,o){o=o||{};
+    const t=document.createElementNS(SVGNS,"text");
+    t.setAttribute("x",x); t.setAttribute("y",y);
+    t.setAttribute("font-size",o.size||16);
+    if(o.weight)t.setAttribute("font-weight",o.weight);
+    if(o.fill)t.setAttribute("fill",o.fill);
+    t.setAttribute("text-anchor",o.anchor||"start");
+    t.style.pointerEvents="none"; t.textContent=str; return t;
+  }
+  function smoothPath(pts){
+    if(!pts||pts.length<2) return "";
+    if(pts.length===2) return `M${pts[0].x},${pts[0].y} L${pts[1].x},${pts[1].y}`;
+    let d=`M${pts[0].x},${pts[0].y}`;
+    for(let i=0;i<pts.length-1;i++){
+      const p0=pts[i-1]||pts[i], p1=pts[i], p2=pts[i+1], p3=pts[i+2]||p2;
+      const c1x=p1.x+(p2.x-p0.x)/6, c1y=p1.y+(p2.y-p0.y)/6;
+      const c2x=p2.x-(p3.x-p1.x)/6, c2y=p2.y-(p3.y-p1.y)/6;
+      d+=` C${c1x},${c1y} ${c2x},${c2y} ${p2.x},${p2.y}`;
+    }
+    return d;
+  }
+  function arrowEl(a,b,col,sw,op){
+    const ang=Math.atan2(b.y-a.y,b.x-a.x), len=8+sw*2.2, w=4+sw;
+    const bx=b.x-len*Math.cos(ang), by=b.y-len*Math.sin(ang);
+    const p1=[bx+w*Math.sin(ang),by-w*Math.cos(ang)], p2=[bx-w*Math.sin(ang),by+w*Math.cos(ang)];
+    const tri=document.createElementNS(SVGNS,"path");
+    tri.setAttribute("d",`M${b.x},${b.y} L${p1[0]},${p1[1]} L${p2[0]},${p2[1]} Z`);
+    tri.setAttribute("fill",col); tri.setAttribute("opacity",op); return tri;
+  }
+  function el(tag,cls,html){const e=document.createElement(tag);
+    if(cls)e.className=cls; if(html!=null)e.innerHTML=html; return e;}
+  function esc(s){return String(s).replace(/[&<>"]/g,c=>(
+    {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+  // classify an edge as a secondary path (error/异常/fallback…) so it can be de-emphasized or hidden.
+  // explicit edge.kind wins; otherwise a light label heuristic catches untagged error wiring.
+  function secKind(e){
+    if(!e) return null;
+    if(e.kind==="error") return "error";
+    if(e.kind==="secondary") return "secondary";
+    if(/error|错误|异常|fail|fallback|降级|retry|重试|skip|跳过/i.test(String(e.label||""))) return "error";
+    return null;
+  }
+  let showSecondary=false;
+
+  // ===== GraphView: one independent canvas (layout + render + pan/zoom) =====
+  function GraphView(svg, D, cbs){
+    cbs=cbs||{};
+    const nodeById={}, clusterById={};
+    (D.nodes||[]).forEach(n=>nodeById[n.id]=n);
+    (D.clusters||[]).forEach(c=>clusterById[c.id]=c);
+    const edges=(D.edges||[]).filter(e=>nodeById[e.from]&&nodeById[e.to]);
+    let npos={},cpos={},epos=[];
+    let curDir=(String(D.rankdir||"LR").toUpperCase()==="TB")?"TB":"LR";
+    const rc=rough.svg(svg);
+    const vp=document.createElementNS(SVGNS,"g"); svg.appendChild(vp);
+    let tx=0,ty=0,scale=1, selected=null, external=null;
+
+    function layout(){
+      const g=new dagre.graphlib.Graph({compound:true});
+      g.setGraph({rankdir:curDir,nodesep:46,ranksep:90,edgesep:26,marginx:40,marginy:48});
+      g.setDefaultEdgeLabel(()=>({}));
+      (D.clusters||[]).forEach(c=>g.setNode(c.id,{label:c.label,cluster:true}));
+      (D.nodes||[]).forEach(n=>{const s=nodeSize(n);g.setNode(n.id,{width:s.w,height:s.h});
+        if(n.cluster&&clusterById[n.cluster])g.setParent(n.id,n.cluster);});
+      // main edges get high weight (dagre keeps them straight & short); secondary edges
+      // are low-weight, and when hidden they're left out of layout entirely so the main
+      // pipeline packs tight instead of reserving channels for invisible wires.
+      edges.forEach((e,i)=>{const sk=secKind(e); if(sk&&!showSecondary)return;
+        g.setEdge(e.from,e.to,{edgeIdx:i,weight:sk?1:8});});
+      dagre.layout(g);
+      npos={};cpos={};epos=[];
+      g.nodes().forEach(id=>{const o=g.node(id);if(!o)return;
+        if(clusterById[id])cpos[id]={x:o.x-o.width/2,y:o.y-o.height/2,w:o.width,h:o.height};
+        else if(nodeById[id])npos[id]={x:o.x-o.width/2,y:o.y-o.height/2,w:o.width,h:o.height,cx:o.x,cy:o.y};});
+      g.edges().forEach(ge=>{const o=g.edge(ge);epos.push({from:ge.v,to:ge.w,points:o.points,spec:edges[o.edgeIdx]||{}});});
+    }
+    function applyVP(){ vp.setAttribute("transform",`translate(${tx},${ty}) scale(${scale})`); }
+    function fit(){
+      let mnx=1e9,mny=1e9,mxx=-1e9,mxy=-1e9;
+      Object.values(npos).concat(Object.values(cpos)).forEach(p=>{
+        mnx=Math.min(mnx,p.x);mny=Math.min(mny,p.y);mxx=Math.max(mxx,p.x+p.w);mxy=Math.max(mxy,p.y+p.h);});
+      if(mnx>mxx)return;
+      const bw=mxx-mnx,bh=mxy-mny,r=svg.getBoundingClientRect(),pad=40,MIN=0.6;
+      const fitS=Math.min((r.width-pad*2)/bw,(r.height-pad*2)/bh);
+      scale=Math.min(1.4,Math.max(fitS,MIN));
+      if(scale>fitS+1e-6){ tx=24-mnx*scale; ty=80-mny*scale; }
+      else { tx=(r.width-bw*scale)/2-mnx*scale; ty=(r.height-bh*scale)/2-mny*scale; }
+    }
+    function lineage(id){
+      const fwd={},bwd={};
+      epos.forEach(e=>{ if(secKind(e.spec)) return;   // data lineage follows the main flow only
+        (fwd[e.from]=fwd[e.from]||[]).push(e.to);(bwd[e.to]=bwd[e.to]||[]).push(e.from);});
+      const walk=(s,adj)=>{const seen=new Set(),st=[s];
+        while(st.length){const x=st.pop();(adj[x]||[]).forEach(y=>{if(!seen.has(y)&&y!==id){seen.add(y);st.push(y);}});}
+        return seen;};
+      return {down:walk(id,fwd),up:walk(id,bwd)};
+    }
+    function render(){
+      while(vp.firstChild)vp.removeChild(vp.firstChild);
+      applyVP();
+      const LIN=selected?lineage(selected):null;
+      const ext=external;            // Set of mapped ids (cross-highlight) or null
+      const dimNode=id=>{
+        if(selected) return id!==selected && !LIN.up.has(id) && !LIN.down.has(id);
+        if(ext) return !ext.has(id);
+        return false;
+      };
+      // clusters
+      (D.clusters||[]).forEach((c,ci)=>{const p=cpos[c.id];if(!p)return;
+        const rk=rc.rectangle(p.x,p.y,p.w,p.h,{roughness:1.4,bowing:1.5,stroke:"#444",strokeWidth:2,fill:"#fff",fillStyle:"solid",seed:100+ci});
+        rk.setAttribute("opacity",".95"); vp.appendChild(rk);
+        vp.appendChild(text(p.x+14,p.y+24,c.label,{size:18,weight:700,fill:"#444"}));});
+      // edges
+      epos.forEach(e=>{
+        const sk=secKind(e.spec);
+        let col="#333",sw=1.6,op=1,dash=null,hot=false;
+        if(sk){                                   // secondary / error: dashed, faint, recede
+          col=(sk==="error")?"#dd97a2":"#bcbcbc"; sw=1.3; dash="6 5"; op=selected?.4:.8;
+        } else if(selected){
+          const dn=LIN.down.has(e.to)&&(e.from===selected||LIN.down.has(e.from));
+          const up=LIN.up.has(e.from)&&(e.to===selected||LIN.up.has(e.to));
+          if(dn){col="var(--accent)";sw=2.4;hot=true;} else if(up){col="var(--up)";sw=2.4;hot=true;} else op=.18;
+        } else if(ext){ op=.18; }
+        const path=document.createElementNS(SVGNS,"path");
+        path.setAttribute("d",smoothPath(e.points));
+        path.setAttribute("fill","none");path.setAttribute("stroke",col);
+        path.setAttribute("stroke-width",sw);path.setAttribute("stroke-linecap","round");
+        path.setAttribute("stroke-linejoin","round");path.setAttribute("opacity",op);
+        if(dash)path.setAttribute("stroke-dasharray",dash);
+        vp.appendChild(path);
+        const a=e.points[e.points.length-2],b=e.points[e.points.length-1];
+        if(a&&b)vp.appendChild(arrowEl(a,b,col,sw,op));
+        if(e.spec.label){
+          const lp=e.points[Math.floor(e.points.length/2)]||e.points[0]||{x:0,y:0};
+          const lt=text(lp.x,lp.y-9,e.spec.label,{size:sk?12:14,fill:hot?col:(sk?col:"#555"),anchor:"middle"});
+          lt.setAttribute("opacity",op); vp.appendChild(lt);
+        }
+      });
+      // nodes
+      (D.nodes||[]).forEach((n,ni)=>{const p=npos[n.id];if(!p)return;
+        const op=dimNode(n.id)?.3:1;
+        const grp=document.createElementNS(SVGNS,"g");
+        grp.setAttribute("class","node-hit"); grp.setAttribute("opacity",op);
+        const ks=KIND[n.kind]||KIND.process;
+        let stroke=ks.stroke,swid=ks.sw,fill=ks.fill;
+        if(n.id===selected){stroke="var(--accent)";swid=3.4;fill="#fff7f7";}
+        else if(selected&&LIN.down.has(n.id)){stroke="var(--accent)";swid=2.8;}
+        else if(selected&&LIN.up.has(n.id)){stroke="var(--up)";swid=2.8;}
+        else if(ext&&ext.has(n.id)){stroke="var(--map)";swid=3.2;fill="#f2fbf7";}
+        const box=rc.rectangle(p.x,p.y,p.w,p.h,{roughness:1.3,bowing:1.2,stroke,strokeWidth:swid,fill,fillStyle:"solid",seed:ni+1});
+        grp.appendChild(box);
+        const lines=String(n.label||n.id).split("\n"),lh=22,sy=p.cy-(lines.length-1)*lh/2+6;
+        lines.forEach((ln,i)=>grp.appendChild(text(p.cx,sy+i*lh,ln,{size:18,anchor:"middle"})));
+        if(n.note)grp.appendChild(text(p.cx,p.y-8,n.note,{size:13,fill:"var(--accent)",anchor:"middle",weight:700}));
+        grp.addEventListener("click",ev=>{ev.stopPropagation();cbs.onSelectNode&&cbs.onSelectNode(n.id);});
+        vp.appendChild(grp);
+      });
+    }
+    // pan / zoom
+    let panning=false,sx=0,sy=0,dragged=false;
+    svg.addEventListener("mousedown",e=>{if(e.target.closest(".node-hit"))return;
+      panning=true;dragged=false;sx=e.clientX-tx;sy=e.clientY-ty;svg.classList.add("grabbing");});
+    window.addEventListener("mousemove",e=>{if(!panning)return;dragged=true;tx=e.clientX-sx;ty=e.clientY-sy;applyVP();});
+    window.addEventListener("mouseup",()=>{panning=false;svg.classList.remove("grabbing");});
+    svg.addEventListener("click",e=>{if(dragged){dragged=false;return;}
+      if(!e.target.closest(".node-hit"))cbs.onBackground&&cbs.onBackground();});
+    svg.addEventListener("wheel",e=>{e.preventDefault();
+      const mult=e.deltaMode===1?16:1;
+      if(VIEW_WHEEL_ZOOM()||e.ctrlKey){
+        const r=svg.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
+        let d=Math.max(-50,Math.min(50,e.deltaY*mult));
+        const f=Math.exp(-d*0.006),ns=Math.min(4,Math.max(.04,scale*f));
+        tx=mx-(mx-tx)*(ns/scale);ty=my-(my-ty)*(ns/scale);scale=ns;
+      } else { tx-=e.deltaX*mult; ty-=e.deltaY*mult; }
+      applyVP();
+    },{passive:false});
+
+    return {
+      svg, hasNode:id=>!!nodeById[id], node:id=>nodeById[id], selectedId:()=>selected,
+      init(){layout();fit();render();},
+      refresh(){layout();fit();render();},
+      refit(){fit();render();},
+      getView(){return {tx,ty,scale};},
+      setView(s){ if(!s)return; tx=s.tx;ty=s.ty;scale=s.scale;applyVP(); },
+      setDir(d){curDir=d;layout();fit();render();},
+      getDir(){return curDir;},
+      setSelected(id){selected=id;external=null;render();},
+      setExternal(set){external=set;selected=null;render();},
+      clear(){selected=null;external=null;render();},
+    };
+  }
+
+  // ===== shared panel =====
+  const panelEl=document.getElementById("panel");
+  function panelClear(){ panelEl.classList.add("empty"); panelEl.querySelector(".body").innerHTML=""; }
+  function panelShow(n, opts){
+    opts=opts||{};
+    panelEl.classList.remove("empty");
+    const body=panelEl.querySelector(".body"); body.innerHTML="";
+    body.appendChild(el("div",null,"<h2>"+esc(n.label||n.id)+
+      (n.kind?' <span class="kind-badge">'+esc(n.kind)+'</span>':"")+"</h2>"));
+    if(opts.mapping) body.appendChild(mappingBox(opts.mapping));
+    if(n.summary) body.appendChild(el("div","summary",esc(n.summary)));
+    if(n.source){const s=el("div","src",esc(n.source));s.title="点击复制";
+      s.onclick=()=>navigator.clipboard&&navigator.clipboard.writeText(n.source);body.appendChild(s);}
+    body.appendChild(ioSection("输入 · INPUTS",n.inputs||[],"from","来源",opts.onFlowSelect));
+    body.appendChild(ioSection("输出 · OUTPUTS",n.outputs||[],"to","去向",opts.onFlowSelect));
+    panelEl.scrollTop=0;
+  }
+  const CHG={kept:"保留",renamed:"重命名",merged:"合并",split:"拆分",new:"新增",moved:"迁移",removed:"移除"};
+  function mappingBox(m){
+    const box=el("div","map-box");
+    if(m.change){const c=el("span","chg "+(m.change==="removed"?"removed":m.change==="new"?"new":""),CHG[m.change]||m.change);box.appendChild(c);}
+    (m.links||[]).forEach(lk=>{
+      const row=el("div","map-link"); row.innerHTML="<b>"+esc(m.linkLabel||"对应")+"：</b>";
+      const a=document.createElement("a"); a.textContent=lk.label; a.onclick=lk.onClick; row.appendChild(a); box.appendChild(row);
+    });
+    if(m.empty) box.appendChild(el("div","map-link","<b>"+esc(m.linkLabel||"对应")+"：</b>"+esc(m.empty)));
+    if(m.why) box.appendChild(el("div","map-why",esc(m.why)));
+    return box;
+  }
+  function ioSection(title,items,linkKey,linkLabel,onFlowSelect){
+    const sec=el("div","io-section"); sec.appendChild(el("h3",null,title));
+    if(!items.length){sec.appendChild(el("div","io-desc","（无）"));return sec;}
+    items.forEach(it=>{
+      const card=el("div","io-item");
+      card.appendChild(el("div","io-head",esc(it.name||"")+(it.type?' <span class="ty">: '+esc(it.type)+'</span>':"")+
+        (it.format?'<span class="fmt">'+esc(it.format)+'</span>':"")));
+      if(it.desc)card.appendChild(el("div","io-desc",esc(it.desc)));
+      const tgt=it[linkKey];
+      (Array.isArray(tgt)?tgt:(tgt?[tgt]:[])).forEach(tid=>{
+        if(!onFlowSelect)return;
+        const fl=el("div","flowlink"); fl.innerHTML="<b>"+linkLabel+"：</b>";
+        const a=document.createElement("a"); a.textContent=tid; a.onclick=()=>onFlowSelect(tid); fl.appendChild(a); card.appendChild(fl);
+      });
+      card.appendChild(renderStruct(it)); sec.appendChild(card);
+    });
+    return sec;
+  }
+  function renderStruct(it){
+    const wrap=el("div","struct"),fmt=it.format||"json";
+    if(fmt==="table"&&Array.isArray(it.columns)){wrap.appendChild(tableEl(it.columns));return wrap;}
+    if(fmt==="code"||fmt==="text"||fmt==="file"){
+      if(fmt==="file"&&it.path)wrap.appendChild(el("div","lbl","FILE "+it.path));
+      const pre=el("pre","code");pre.textContent=it.example||it.text||it.path||it.schema||"";wrap.appendChild(pre);return wrap;}
+    if(it.schema!==undefined){wrap.appendChild(el("div","lbl","结构"));wrap.appendChild(tree(it.schema));}
+    if(it.example!==undefined){wrap.appendChild(el("div","lbl","示例"));wrap.appendChild(tree(it.example));}
+    if(it.schema===undefined&&it.example===undefined){const pre=el("pre","code");pre.textContent="(无结构信息)";wrap.appendChild(pre);}
+    return wrap;
+  }
+  function tableEl(cols){const t=document.createElement("table");t.className="cols";
+    const keys=Object.keys(cols[0]||{name:1,type:1,desc:1});const h=t.insertRow();
+    keys.forEach(k=>{const th=document.createElement("th");th.textContent=k;h.appendChild(th);});
+    cols.forEach(c=>{const r=t.insertRow();keys.forEach(k=>{const td=r.insertCell();td.textContent=c[k]==null?"":String(c[k]);});});
+    const d=el("div","tree");d.appendChild(t);return d;}
+  function tree(v){const r=el("div","tree");r.appendChild(treeNode("",v,true));return r;}
+  function treeNode(key,val,open){
+    if(val!==null&&typeof val==="object"){
+      const det=document.createElement("details");if(open)det.open=true;
+      const sum=document.createElement("summary"),isArr=Array.isArray(val);
+      sum.innerHTML=(key?'<span class="k">'+esc(key)+'</span>: ':"")+(isArr?'['+val.length+']':'{'+Object.keys(val).length+'}');
+      det.appendChild(sum);
+      (isArr?val:Object.keys(val)).forEach((k,i)=>det.appendChild(treeNode(isArr?String(i):k,isArr?val[k]:val[k],false)));
+      return det;}
+    const leaf=el("div","leaf");leaf.innerHTML=(key?'<span class="k">'+esc(key)+'</span>: ':"")+scalar(val);return leaf;
+  }
+  function scalar(v){if(typeof v==="string")return '<span class="s">"'+esc(v)+'"</span>';
+    if(typeof v==="number")return '<span class="n">'+v+'</span>';
+    if(typeof v==="boolean")return '<span class="b">'+v+'</span>';
+    if(v===null)return '<span class="b">null</span>';return esc(String(v));}
+
+  // ===== controls (wheel-zoom + direction + migration) =====
+  let wheelZoom=false;
+  function VIEW_WHEEL_ZOOM(){ return wheelZoom; }
+  const controls=document.getElementById("controls");
+  function addBtn(label,title){const b=document.createElement("button");b.textContent=label;if(title)b.title=title;controls.appendChild(b);return b;}
+
+  // ===== bootstrap =====
+  const panes=document.getElementById("panes");
+  function makePane(tagText,tagCls,withMax){
+    const pane=el("div","pane");
+    const svg=document.createElementNS(SVGNS,"svg"); pane.appendChild(svg);
+    if(tagText||withMax){
+      const head=el("div","pane-head");
+      if(tagText) head.appendChild(el("span","pane-tag "+(tagCls||""),esc(tagText)));
+      if(withMax){
+        const sb=el("button","pane-max","⇄ 切换"); sb.style.display="none"; head.appendChild(sb); pane._switchBtn=sb;
+        const mb=el("button","pane-max","⤢ 全屏"); head.appendChild(mb); pane._maxBtn=mb;
+      }
+      pane.appendChild(head);
+    }
+    panes.appendChild(pane); return {svg,pane};
+  }
+
+  let views=[];
+  if(!COMPARE){
+    // ---- single mode ----
+    document.getElementById("title").innerHTML=esc(FD.title||"flow")+(FD.summary?"<small>"+esc(FD.summary)+"</small>":"");
+    document.title=FD.title||document.title;
+    const {svg}=makePane(null);
+    let view;
+    function selSingle(id){ if(!view.hasNode(id))return; view.setSelected(id);
+      panelShow(view.node(id),{onFlowSelect:selSingle}); }
+    view=GraphView(svg,FD,{ onSelectNode:selSingle, onBackground:()=>{view.clear();panelClear();} });
+    view.init(); views=[view];
+  } else {
+    // ---- compare mode ----
+    document.getElementById("title").innerHTML="";
+    const oldSpec=FD.old, newSpec=FD.new;
+    document.title=(newSpec.title||oldSpec.title||"refactor")+" · 重构对比";
+    const stratLabel={ "rewrite":"从零重写", "in-place":"原地改造" };
+    const mig=newSpec.migration||{};
+    const oldSvg=makePane("旧架构"+(oldSpec.title?" · "+oldSpec.title:""),"old",true).svg;
+    const newSvg=makePane("新架构"+(mig.strategy?" · "+(stratLabel[mig.strategy]||mig.strategy):""),"new",true).svg;
+
+    const newByOld={};   // oldId -> [newId...]
+    (newSpec.nodes||[]).forEach(n=>{(n.maps_from||[]).forEach(o=>{(newByOld[o]=newByOld[o]||[]).push(n.id);});});
+    const removedBy={}; (newSpec.removed||[]).forEach(r=>{ removedBy[r.old_id]=r; });
+
+    const oldView=GraphView(oldSvg,oldSpec,{onSelectNode:id=>selectIn("old",id),onBackground:clearBoth});
+    const newView=GraphView(newSvg,newSpec,{onSelectNode:id=>selectIn("new",id),onBackground:clearBoth});
+
+    function clearBoth(){oldView.clear();newView.clear();panelClear();}
+    function selectIn(side,id){
+      if(side==="old"){
+        oldView.setSelected(id);
+        const tos=newByOld[id]||[]; newView.setExternal(new Set(tos));
+        const links=tos.map(nid=>({label:(newView.node(nid).label||nid),onClick:()=>selectIn("new",nid)}));
+        const rem=removedBy[id];
+        panelShow(oldView.node(id),{
+          mapping:{ change: tos.length?undefined:(rem?"removed":undefined), linkLabel:"去向(新)",
+                    links, empty: tos.length?undefined:(rem?"本步在新架构中移除":"（无对应新节点）"),
+                    why: rem?rem.rationale:undefined },
+          onFlowSelect:fid=>{ if(oldView.hasNode(fid)) selectIn("old",fid); }
+        });
+      } else {
+        newView.setSelected(id);
+        const n=newView.node(id), froms=n.maps_from||[];
+        oldView.setExternal(new Set(froms));
+        const links=froms.filter(o=>oldView.hasNode(o)).map(o=>({label:(oldView.node(o).label||o),onClick:()=>selectIn("old",o)}));
+        panelShow(n,{
+          mapping:{ change:n.change||(froms.length?"kept":"new"), linkLabel:"源自(旧)",
+                    links, empty: froms.length?undefined:"（从零新增，无旧对应）", why:n.rationale },
+          onFlowSelect:fid=>{ if(newView.hasNode(fid)) selectIn("new",fid); }
+        });
+      }
+    }
+    oldView.init(); newView.init(); views=[oldView,newView];
+
+    // per-pane 全屏：最大化一张图（另一张暂隐）；全屏时可直接「切换」到另一张；
+    // 切换/还原都保留各自最大化前的缩放/位置（不重置）。
+    const paneEls=[...panes.children];
+    const paneNames=["旧架构","新架构"];
+    let maxedIdx=-1; const splitView=[null,null];
+    function showOnly(i){ paneEls.forEach((pn,k)=>pn.style.display=(k===i?"":"none")); }
+    function updateBtns(){
+      paneEls.forEach((pn,k)=>{ const mb=pn._maxBtn, sb=pn._switchBtn; if(!mb)return;
+        if(maxedIdx<0){ mb.textContent="⤢ 全屏"; if(sb)sb.style.display="none"; }
+        else if(k===maxedIdx){ mb.textContent="⤡ 还原"; if(sb){sb.style.display="";sb.textContent="⇄ 切到"+paneNames[1-k];} }
+      });
+    }
+    function maximize(i){ splitView[i]=views[i].getView(); showOnly(i); views[i].refit(); maxedIdx=i; updateBtns(); }
+    function restore(){ if(maxedIdx<0)return; views[maxedIdx].setView(splitView[maxedIdx]);
+      paneEls.forEach(pn=>pn.style.display=""); maxedIdx=-1; updateBtns(); }
+    paneEls.forEach((pane,idx)=>{
+      if(pane._maxBtn) pane._maxBtn.onclick=()=>{ if(maxedIdx===idx) restore(); else maximize(idx); };
+      if(pane._switchBtn) pane._switchBtn.onclick=()=>{ if(maxedIdx<0)return;
+        views[maxedIdx].setView(splitView[maxedIdx]);   // 把当前这张还原回它的分屏视图
+        maximize(1-maxedIdx);                            // 再最大化另一张
+      };
+    });
+
+    // migration overlay
+    const migBox=document.getElementById("mig"), migCard=migBox.querySelector(".card");
+    const migBtn=addBtn("🧭 迁移计划","查看重构策略 / 步骤 / 风险");
+    migBtn.onclick=()=>{ buildMig(); migBox.classList.add("show"); };
+    migBox.addEventListener("click",e=>{ if(e.target===migBox) migBox.classList.remove("show"); });
+    function buildMig(){
+      migCard.innerHTML="";
+      const close=el("button","close","✕ 关闭"); close.onclick=()=>migBox.classList.remove("show"); migCard.appendChild(close);
+      migCard.appendChild(el("h2",null,esc((newSpec.title||"")+" 迁移计划")));
+      if(mig.strategy)migCard.appendChild(el("div","strat","策略："+esc(stratLabel[mig.strategy]||mig.strategy)));
+      if(mig.summary)migCard.appendChild(el("div","summary",esc(mig.summary)));
+      if(Array.isArray(mig.steps)&&mig.steps.length){migCard.appendChild(el("h3",null,"迁移步骤"));
+        const ol=document.createElement("ol");mig.steps.forEach(s=>{const li=document.createElement("li");li.textContent=s;ol.appendChild(li);});migCard.appendChild(ol);}
+      if(Array.isArray(mig.risks)&&mig.risks.length){migCard.appendChild(el("h3",null,"风险 / 注意"));
+        const ul=document.createElement("ul");mig.risks.forEach(s=>{const li=document.createElement("li");li.textContent=s;ul.appendChild(li);});migCard.appendChild(ul);}
+    }
+  }
+
+  // shared toggles (apply to all views)
+  const wheelBtn=addBtn("🖱 滚轮缩放: 关","开启后鼠标滚轮用于放大/缩小");
+  wheelBtn.onclick=()=>{wheelZoom=!wheelZoom;wheelBtn.textContent="🖱 滚轮缩放: "+(wheelZoom?"开":"关");wheelBtn.classList.toggle("on",wheelZoom);};
+  let dir=views[0]?views[0].getDir():"LR";
+  const dirBtn=addBtn(dir==="LR"?"⇄ 水平":"⇅ 垂直","切换布局方向（水平 / 垂直）");
+  dirBtn.onclick=()=>{dir=dir==="LR"?"TB":"LR";dirBtn.textContent=dir==="LR"?"⇄ 水平":"⇅ 垂直";views.forEach(v=>v.setDir(dir));};
+
+  // secondary / error edges: hidden by default to keep the main flow clean; toggle reveals them dashed
+  const specs = COMPARE ? [FD.old, FD.new] : [FD];
+  const hasSec = specs.some(s=>(s.edges||[]).some(e=>secKind(e)));
+  if(hasSec){
+    const secBtn=addBtn("⤳ 异常/次要边: 隐藏","显示/隐藏异常·次要数据流边（默认隐藏，主流程更清爽）");
+    secBtn.onclick=()=>{ showSecondary=!showSecondary;
+      secBtn.textContent="⤳ 异常/次要边: "+(showSecondary?"显示":"隐藏");
+      secBtn.classList.toggle("on",showSecondary);
+      views.forEach(v=>v.refresh()); };
+  }
+
+  // 折叠 / 展开右侧 I/O 面板（折叠后图占满整宽；不重排，graph 原位获得更多空间）
+  const panelBtn=addBtn("⟩ 面板","折叠 / 展开右侧 I/O 面板");
+  panelBtn.onclick=()=>{ const c=panelEl.classList.toggle("collapsed");
+    panelBtn.textContent=(c?"⟨":"⟩")+" 面板"; panelBtn.classList.toggle("on",c); };
+})();
+</script>
+</body>
+</html>
